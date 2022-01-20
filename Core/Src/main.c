@@ -89,12 +89,13 @@ volatile float lux_by_ADC = 0;
 //zmienna natężenia światła za pomocą UART
 volatile uint32_t lux_by_UART = 0;
 
+//zmienna
+volatile uint32_t max_lux = 1200;
+
 //param PID
-#define PID_PARAM_KP        0.5            /* Proporcional */
+#define PID_PARAM_KP        0.5            /* Proportional */
 #define PID_PARAM_KI        0.1       /* Integral */
 #define PID_PARAM_KD        0
-
-//jakies deklaracje nwm
 float pid_error = 0;
 float duty = 0;
 
@@ -151,13 +152,16 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  	  //TO JEST MOJ ZNACZNIKOWY KOMENT
+
 	//inicjalizacja czujnika światła
 	BH1750_Init(&hbh1750_1);
 
-	//wystartowanie timera odpowiadającego za cykliczny pomiar i realizację sterowania
+	//start timera 2 odpowiadającego za cykliczny pomiar i realizację sterowania
 	HAL_TIM_Base_Start_IT(&htim2);
+	//start timera 4 odpowiadającego za przesyłanie wartości na port szeregowy
+	HAL_TIM_Base_Start_IT(&htim4);
 	//wystartowanie PWM
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	//przypisanie wypełnienia do kanału pwm
@@ -165,15 +169,13 @@ int main(void)
 	//nasłuch na komendę z terminala UART w trybie przerwaniowym
 	HAL_UART_Receive_IT(&huart3, (uint8_t*)user_val, 4);
 
-	//Start ADC w trybieprzerwaniowym
-		  HAL_ADC_Start_IT(&hadc1);
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
+
 
 
     /* USER CODE END WHILE */
@@ -249,63 +251,69 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 
-//przerwanie od portu szeregowego przyjmujące i przypisujące do zmiennej zadaną wartość
+////przerwanie od portu szeregowego przyjmujące i przypisujące do zmiennej zadaną wartość
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 
 	//obliczenie żądanej wartości natężenia oświetlenia
 	lux_by_UART = 1000*((int)user_val[0] - 48) + 100*((int)user_val[1] - 48) + 10*((int)user_val[2] - 48) + 1*((int)user_val[3] - 48);
 
+	if(lux_by_UART > max_lux)
+	{
+		lux_by_UART = max_lux;
+	}
+
 	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm);
 	HAL_UART_Receive_IT(&huart3, (uint8_t*)user_val, 4);
 }
 
-////przerwanie od ADC
-//void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
-//{
-//	const uint32_t ADC_REG_MAX = 0xfff; //12-bits
-//	const float ADC_VOLTAGE_MAX = 3.3; //[V]
-//	const uint32_t ADC_TIMEOUT = 100; //[as]
-////	if(hadc->Instance == ADC1)
-////	{
-//		ADC_measurement = HAL_ADC_GetValue(&hadc1);
-//		ADC_voltage = ((float)ADC_measurement / (float)ADC_REG_MAX) * ADC_VOLTAGE_MAX;
-//		ADC_voltage_mV = (uint32_t)(1000.0*ADC_voltage);
-////	}
-//
-//	lux_by_ADC = ADC_voltage_mV * LUXTOMV_RATIO;
-//}
+//przerwanie od ADC przyjmujące i przypisujące do zmiennej zadaną wartość
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
 
-//przerwanie od timera następujące co odp czest.
+		ADC_measurement = HAL_ADC_GetValue(&hadc1);
+		ADC_voltage = ((float)ADC_measurement / (float)ADC_REG_MAX) * ADC_VOLTAGE_MAX;
+		ADC_voltage_mV = (uint32_t)(1000.0*ADC_voltage);
+
+
+	lux_by_ADC = ADC_voltage_mV * LUXTOMV_RATIO;
+}
+
+//przerwanie od timera realizujące pomiar oraz sterowanie co odp czest.
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	// odczyt natężenia światła
-	light = BH1750_ReadLux(&hbh1750_1);
+	if(htim -> Instance == TIM2)
+	{
+		// odczyt natężenia światła
+			light = BH1750_ReadLux(&hbh1750_1);
 
-	//
-	pid_error = lux_by_UART - light;
+			pid_error = lux_by_ADC - light;
 
-	duty = arm_pid_f32(&PID, pid_error);
+			duty = arm_pid_f32(&PID, pid_error);
 
-	if (duty > 1000) {
-		duty = 1000;
-	} else if (duty < 0) {
-		duty = 0;
+			if (duty > 1000) {
+				duty = 1000;
+			} else if (duty < 0) {
+				duty = 0;
+			}
+
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);
+
+
+			// odczyt natężenia światła - całkowity
+			light_calkowite = (uint16_t)light;
+
+			//Start ADC w trybieprzerwaniowym
+		HAL_ADC_Start_IT(&hadc1);
 	}
-
-	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);
-
-
-	// odczyt natężenia światła - całkowity
-	light_calkowite = (uint16_t)light;
-
-	//transmisja całkowitej wartości pomiaru na port szeregowy
-//	length = sprintf(data_msg, "%6d\n\r", (int)light);
-//	HAL_UART_Transmit(&huart3, (uint8_t*)data_msg, length, 0xffff);
-
-	length = sprintf(data_msg, " POM: %d \[lux\] , REF: %d \[lux\] , STER: %d \r\n", (int)light,  lux_by_UART, (int)duty);
-	HAL_UART_Transmit(&huart3, data_msg, length, 0xffff);
+	//przesył POMIARU, syg. REFERENCYJNEGO, STEROWANIA na port szeregowy
+	if(htim -> Instance == TIM4)
+	{
+		length = sprintf(data_msg, " POM: %d \[lux\] , REF: %d \[lux\] , STER: %d \r\n", (int)light,  lux_by_UART, (int)duty);
+		HAL_UART_Transmit(&huart3, data_msg, length, 0xffff);
+	}
 }
+
 /* USER CODE END 4 */
 
 /**
