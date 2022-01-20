@@ -1,0 +1,2 @@
+bh_1750.c:10:6:BH1750_Init	32	static
+bh_1750.c:21:7:BH1750_ReadLux	32	static
