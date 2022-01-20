@@ -152,7 +152,7 @@ int main(void)
   MX_TIM3_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-
+  	  //TO JEST MOJ ZNACZNIKOWY KOMENT
 	//inicjalizacja czujnika światła
 	BH1750_Init(&hbh1750_1);
 
