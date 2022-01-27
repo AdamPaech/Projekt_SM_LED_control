@@ -84,10 +84,10 @@ volatile float ADC_voltage = 0; //wartośc napięcia w Voltach
 volatile uint32_t ADC_voltage_mV = 0; //wartość napięcia w miliVoltach
 
 //flaga - wyznacza urz. wejscia. 1 -> terminal; 0 -> potencjometr
-volatile uint32_t flag = 0;
+volatile uint32_t flag = 1;
 
 //zmienna globalna zadanego natężenia światła uniwersalna
-volatile float lux_demanded = 0;
+volatile float lux_demanded = 500;
 
 //zmienna natężenia światła za pomocą potencjometru
 volatile float lux_by_ADC = 0;
