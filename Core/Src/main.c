@@ -43,7 +43,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define LUXTOMV_RATIO 0.4209
+#define LUXTOMV_RATIO 0.305
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -83,14 +83,20 @@ volatile uint32_t ADC_measurement = 0; //wartość rejestru
 volatile float ADC_voltage = 0; //wartośc napięcia w Voltach
 volatile uint32_t ADC_voltage_mV = 0; //wartość napięcia w miliVoltach
 
+//flaga - wyznacza urz. wejscia. 1 -> terminal; 0 -> potencjometr
+volatile uint32_t flag = 0;
+
+//zmienna globalna zadanego natężenia światła uniwersalna
+volatile float lux_demanded = 0;
+
 //zmienna natężenia światła za pomocą potencjometru
 volatile float lux_by_ADC = 0;
 
 //zmienna natężenia światła za pomocą UART
 volatile uint32_t lux_by_UART = 0;
 
-//zmienna
-volatile uint32_t max_lux = 1200;
+//zmienna ograniczająca
+volatile uint32_t max_lux = 1000;
 
 //param PID
 #define PID_PARAM_KP        0.5            /* Proportional */
@@ -254,13 +260,29 @@ void SystemClock_Config(void)
 ////przerwanie od portu szeregowego przyjmujące i przypisujące do zmiennej zadaną wartość
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-
-	//obliczenie żądanej wartości natężenia oświetlenia
-	lux_by_UART = 1000*((int)user_val[0] - 48) + 100*((int)user_val[1] - 48) + 10*((int)user_val[2] - 48) + 1*((int)user_val[3] - 48);
-
-	if(lux_by_UART > max_lux)
+	if(((int)user_val[0] - 48) == 0 && ((int)user_val[1]- 48) == 0 && ((int)user_val[2]- 48) == 0 && ((int)user_val[3] - 48) == 0)
 	{
-		lux_by_UART = max_lux;
+		if(flag == 0)
+		{
+			flag = 1; //terminal jest wejsciem
+		}
+	}
+
+	if(((int)user_val[0] - 48) == 9 && ((int)user_val[1]- 48) == 9 && ((int)user_val[2]- 48) == 9 && ((int)user_val[3] - 48) == 9)
+	{
+		flag = 0;
+	}
+
+	if(flag == 1)
+	{
+		//obliczenie żądanej wartości natężenia oświetlenia na podstawie odczytu z terminala
+			lux_by_UART = 1000*((int)user_val[0] - 48) + 100*((int)user_val[1] - 48) + 10*((int)user_val[2] - 48) + 1*((int)user_val[3] - 48);
+
+			if(lux_by_UART > max_lux)
+			{
+				lux_by_UART = max_lux;
+			};
+			lux_demanded = lux_by_UART;
 	}
 
 	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm);
@@ -276,7 +298,17 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 		ADC_voltage_mV = (uint32_t)(1000.0*ADC_voltage);
 
 
-	lux_by_ADC = ADC_voltage_mV * LUXTOMV_RATIO;
+		if(flag == 0)
+		{
+			lux_by_ADC = ADC_voltage_mV * LUXTOMV_RATIO;
+
+			if(lux_by_ADC > max_lux)
+			{
+				lux_by_ADC = max_lux;
+			}
+			lux_demanded = lux_by_ADC;
+		}
+
 }
 
 //przerwanie od timera realizujące pomiar oraz sterowanie co odp czest.
@@ -287,7 +319,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		// odczyt natężenia światła
 			light = BH1750_ReadLux(&hbh1750_1);
 
-			pid_error = lux_by_ADC - light;
+			pid_error = lux_demanded - light; //lux_in
 
 			duty = arm_pid_f32(&PID, pid_error);
 
@@ -309,7 +341,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	//przesył POMIARU, syg. REFERENCYJNEGO, STEROWANIA na port szeregowy
 	if(htim -> Instance == TIM4)
 	{
-		length = sprintf(data_msg, " POM: %d \[lux\] , REF: %d \[lux\] , STER: %d \r\n", (int)light,  lux_by_UART, (int)duty);
+		length = sprintf(data_msg, " POM: %d \[lux\] , REF: %d \[lux\] , STER: %d \r\n", (int)light,  (int)lux_demanded, (int)duty);
 		HAL_UART_Transmit(&huart3, data_msg, length, 0xffff);
 	}
 }
